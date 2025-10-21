@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>学校祭バザー</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+body { font-family:'Segoe UI', sans-serif; margin:0; padding:0; background:#f0f0f0;}
+header { background:#ff6f61; color:white; padding:1rem; display:flex; justify-content:space-between; align-items:center; }
+header h1 { margin:0; }
+header button { background:white; color:#ff6f61; border:none; padding:0.5rem 1rem; border-radius:5px; cursor:pointer; transition:0.2s; }
+header button:hover { background:#ffd9d0; }
+main { padding:1rem; }
+.store-list, .product-list, .cart { display:flex; flex-wrap:wrap; gap:1rem; }
+.store-card, .product-card, .cart-item { background:white; border-radius:10px; padding:1rem; box-shadow:0 2px 5px rgba(0,0,0,0.2); transition:0.2s; }
+.store-card:hover, .product-card:hover { transform:scale(1.05); cursor:pointer; }
+.store-card img, .product-card img { width:100px; height:100px; object-fit:cover; border-radius:8px; margin-bottom:0.5rem; }
+.cart { flex-direction:column; max-width:400px; margin-top:1rem; }
+.cart-item { display:flex; justify-content:space-between; align-items:center; }
+.cart-item input { width:50px; margin-left:0.5rem; }
+.editor-container { display:flex; flex-direction:column; gap:1rem; }
+.editor-container input, .editor-container select { padding:0.5rem; border-radius:5px; border:1px solid #ccc; }
+.editor-container button { background:#ff6f61; color:white; border:none; padding:0.5rem 1rem; border-radius:5px; cursor:pointer; transition:0.2s; }
+.editor-container button:hover { background:#ff3b2f; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>学校祭バザー</h1>
+  <button onclick="showEditorLogin()">出店者用（編集）</button>
+</header>
+
+<main id="login-view">
+  <h2>Google アカウントでログインして購入</h2>
+  <div id="g_id_onload"
+       data-client_id="859852551489-ud1pm28um289qtlvc3pr3mj7q10jgggh.apps.googleusercontent.com"
+       data-login_uri="https://script.google.com/macros/s/AKfycbzIaBAAkALnc_BA6tUw3nk0XfJYuSpQhoVLU5Pw0PFvH2iNGS9Ynf4KjuWkPtwldaFpSg/exec"
+       data-auto_prompt="false"
+       data-callback="handleCredentialResponse">
+  </div>
+  <div class="g_id_signin"></div>
+</main>
+
+<main id="customer-view" style="display:none;">
+  <h2>出店一覧</h2>
+  <div class="store-list" id="storeList"></div>
+  <h2>カート</h2>
+  <div class="cart" id="cart"></div>
+  <button onclick="checkout()">購入確認へ</button>
+</main>
+
+<main id="editor-view" style="display:none;">
+  <h2>出店者編集ページ</h2>
+  <div class="editor-container">
+    <h3>店舗登録</h3>
+    <input id="storeName" placeholder="店舗名">
+    <input id="storeIcon" type="file" accept="image/*">
+    <button onclick="addStore()">店舗追加</button>
+
+    <h3>商品登録</h3>
+    <select id="storeSelect"></select>
+    <input id="productName" placeholder="商品名">
+    <input id="productPrice" placeholder="価格" type="number">
+    <input id="productImage" type="file" accept="image/*">
+    <button onclick="addProduct()">商品追加</button>
+
+    <h3>商品一覧（編集）</h3>
+    <div id="productEditor"></div>
+  </div>
+  <button onclick="backToCustomer()">顧客ページに戻る</button>
+</main>
+
+<script>
+const PW_USER = "seitokaibaza2025";
+const PW_ADMIN = "kanri2025";
+
+let stores = JSON.parse(localStorage.getItem("stores")||"[]");
+let cart = [];
+let buyerID = null;
+
+function handleCredentialResponse(response) {
+  const payload = JSON.parse(atob(response.credential.split('.')[1]));
+  buyerID = payload.sub;
+  document.getElementById("login-view").style.display="none";
+  document.getElementById("customer-view").style.display="block";
+  renderStores();
+}
+
+function renderStores(){
+  const list = document.getElementById("storeList");
+  list.innerHTML = "";
+  stores.forEach((s,i)=>{
+    const div=document.createElement("div");
+    div.className="store-card";
+    div.innerHTML=`<img src="${s.icon}" alt="${s.name}"><p>${s.name}</p>`;
+    div.onclick=()=>openStore(i);
+    list.appendChild(div);
+  });
+}
+
+function openStore(idx){
+  const store = stores[idx];
+  const list = document.getElementById("storeList");
+  list.innerHTML = `<h3>${store.name}の商品</h3>`;
+  store.products.forEach(p=>{
+    const div=document.createElement("div");
+    div.className="product-card";
+    div.innerHTML=`<img src="${p.image}"><p>${p.name}</p><p>¥${p.price}</p>`;
+    div.onclick=()=>addToCart(p, store.name);
+    list.appendChild(div);
+  });
+}
+
+function addToCart(product, storeName){
+  if(confirm(product.name+"をカートに入れますか？")){
+    let exist = cart.find(c=>c.name===product.name && c.store===storeName);
+    if(exist){exist.quantity++;} else {cart.push({...product,quantity:1, store:storeName});}
+    renderCart();
+  }
+}
+
+function renderCart(){
+  const c = document.getElementById("cart");
+  c.innerHTML="";
+  cart.forEach((p,i)=>{
+    const div=document.createElement("div");
+    div.className="cart-item";
+    div.innerHTML=`${p.name} - ¥${p.price} x <input type="number" min="1" value="${p.quantity}" onchange="changeQuantity(${i},this.value)"> <button onclick="removeCart(${i})">削除</button>`;
+    c.appendChild(div);
+  });
+}
+
+function changeQuantity(i,val){ cart[i].quantity=Number(val); renderCart(); }
+function removeCart(i){ cart.splice(i,1); renderCart(); }
+
+function checkout(){
+  if(!buyerID){alert("ログインしていません"); return;}
+  if(cart.length===0){alert("カートが空です"); return;}
+  let total = cart.reduce((a,b)=>a+b.price*b.quantity,0);
+  const order = {buyerID, cart, total};
+  sendToSheet(order);
+  alert("購入完了！\n合計: ¥"+total);
+  cart=[]; renderCart(); renderStores();
+}
+
+function sendToSheet(order){
+  const url = "https://script.google.com/macros/s/AKfycbzIaBAAkALnc_BA6tUw3nk0XfJYuSpQhoVLU5Pw0PFvH2iNGS9Ynf4KjuWkPtwldaFpSg/exec"; 
+  fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(order)})
+    .catch(e=>console.log(e));
+}
+
+// 出店者用
+function showEditorLogin(){
+  let pw = prompt("パスワードを入力");
+  if(pw===PW_USER || pw===PW_ADMIN){
+    document.getElementById("customer-view").style.display="none";
+    document.getElementById("editor-view").style.display="block";
+    renderEditor(pw===PW_ADMIN);
+  } else alert("パスワードが違います");
+}
+
+function backToCustomer(){
+  document.getElementById("editor-view").style.display="none";
+  document.getElementById("customer-view").style.display="block";
+  renderStores();
+}
+
+function addStore(){
+  const name=document.getElementById("storeName").value;
+  const file=document.getElementById("storeIcon").files[0];
+  if(!name||!file){alert("未入力"); return;}
+  const reader=new FileReader();
+  reader.onload=e=>{
+    stores.push({name,icon:e.target.result,products:[]});
+    saveStores(); renderStores(); renderEditor();
+  };
+  reader.readAsDataURL(file);
+}
+
+function addProduct(){
+  const idx=document.getElementById("storeSelect").value;
+  const name=document.getElementById("productName").value;
+  const price=document.getElementById("productPrice").value;
+  const file=document.getElementById("productImage").files[0];
+  if(!name||!price||!file){alert("未入力"); return;}
+  const reader=new FileReader();
+  reader.onload=e=>{
+    stores[idx].products.push({name,price,image:e.target.result});
+    saveStores(); renderEditor();
+  };
+  reader.readAsDataURL(file);
+}
+
+function renderEditor(admin=false){
+  const sel=document.getElementById("storeSelect");
+  sel.innerHTML="";
+  stores.forEach((s,i)=>{ 
+    const op=document.createElement("option"); op.value=i; op.textContent=s.name; sel.appendChild(op);
+  });
+
+  const ed=document.getElementById("productEditor");
+  ed.innerHTML="";
+  stores.forEach((s,i)=>{
+    const div=document.createElement("div");
+    div.innerHTML=`<h4>${s.name}</h4>`;
+    s.products.forEach((p,j)=>{
+      const pdiv=document.createElement("div");
+      pdiv.innerHTML=`${p.name} - ¥${p.price} <button onclick="editProduct(${i},${j})">編集</button> <button onclick="deleteProduct(${i},${j})">削除</button>`;
+      div.appendChild(pdiv);
+    });
+    ed.appendChild(div);
+  });
+}
+
+function editProduct(storeIdx, prodIdx){
+  const p = stores[storeIdx].products[prodIdx];
+  const name = prompt("商品名",p.name); if(!name) return;
+  const price = prompt("価格",p.price); if(!price) return;
+  stores[storeIdx].products[prodIdx].name = name;
+  stores[storeIdx].products[prodIdx].price = Number(price);
+  saveStores(); renderEditor();
+}
+
+function deleteProduct(storeIdx, prodIdx){
+  if(confirm("削除しますか？")){
+    stores[storeIdx].products.splice(prodIdx,1);
+    saveStores(); renderEditor();
+  }
+}
+
+function saveStores(){ localStorage.setItem("stores",JSON.stringify(stores)); }
+</script>
+
+</body>
+</html>
